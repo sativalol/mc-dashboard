@@ -7,9 +7,11 @@ const { spawn, exec } = require('child_process');
 const axios = require('axios');
 const os = require('os');
 const JavaScriptObfuscator = require('javascript-obfuscator');
+const cron = require('node-cron');
 require('dotenv').config();
 
 const isWin = process.platform === 'win32';
+let mcProcess = null;
 
 let cfg = {};
 try {
@@ -81,51 +83,54 @@ function check_auth(req, res, next) {
 }
 
 function run_cmd(cmd) {
-  if (isWin) {
-    const dir = path.join(cfg.mcPath, 'logs');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.appendFileSync(
-      path.join(dir, 'latest.log'), 
-      `[${new Date().toLocaleTimeString()}] [Server thread/INFO]: [DevAdmin]: ${cmd}\n`
-    );
-    return Promise.resolve();
-  }
   return new Promise((res, rej) => {
-    const safeCmd = cmd.replace(/"/g, '\\"');
-    exec(`screen -S "${cfg.screenSessionName}" -X eval 'stuff "${safeCmd}\\015"'`, (err) => {
-      if (err) rej(err);
-      else res();
-    });
+    if (!mcProcess) return rej(new Error('not running'));
+    mcProcess.stdin.write(cmd + '\n');
+    res();
   });
 }
 
 function start() {
-  if (isWin) {
-    const dir = path.join(cfg.mcPath, 'logs');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const log = path.join(dir, 'latest.log');
-    fs.writeFileSync(log, `[${new Date().toLocaleTimeString()}] [Server thread/INFO]: Starting minecraft server version 1.20.1\n`);
-    setTimeout(() => {
-      fs.appendFileSync(log, `[${new Date().toLocaleTimeString()}] [Server thread/INFO]: Done (1.5s)! For help, type "help"\n`);
-    }, 1500);
-    return Promise.resolve();
-  }
   return new Promise((res) => {
-    exec(`screen -dmS "${cfg.screenSessionName}" bash -c "${cfg.startCmd}"`, { cwd: cfg.mcPath }, () => {
-      res();
+    if (mcProcess) return res();
+    const sh = isWin ? 'cmd.exe' : 'bash';
+    const flag = isWin ? '/c' : '-c';
+    mcProcess = spawn(sh, [flag, cfg.startCmd], { cwd: cfg.mcPath });
+
+    const logFile = path.join(cfg.mcPath, 'logs', 'latest.log');
+    if (!fs.existsSync(path.dirname(logFile))) fs.mkdirSync(path.dirname(logFile), { recursive: true });
+
+    mcProcess.stdout.on('data', d => fs.appendFileSync(logFile, d));
+    mcProcess.stderr.on('data', d => fs.appendFileSync(logFile, d));
+    mcProcess.on('exit', () => {
+      mcProcess = null;
+      fs.appendFileSync(logFile, `\n[${new Date().toLocaleTimeString()}] [Server thread/INFO]: Process exited.\n`);
     });
+    res();
   });
 }
 
 function isRunning() {
-  if (isWin) return Promise.resolve(true); // close enough
-  return new Promise((res) => {
-    exec(`screen -list`, (err, out) => {
-      const regex = new RegExp(`\\.${cfg.screenSessionName}\\s+\\(`);
-      res(!err && regex.test(out));
-    });
+  return Promise.resolve(mcProcess !== null);
+}
+
+let cronTasks = [];
+function setupCron() {
+  cronTasks.forEach(t => t.stop());
+  cronTasks = [];
+  if (!cfg.cronJobs) return;
+  cfg.cronJobs.forEach(job => {
+    if (cron.validate(job.expr)) {
+      cronTasks.push(cron.schedule(job.expr, async () => {
+        if (!mcProcess) return;
+        for (const c of job.cmds) {
+          await run_cmd(c);
+        }
+      }));
+    }
   });
 }
+setupCron();
 
 app.get('/auth/login', (req, res) => {
   res.redirect(`https://discord.com/api/oauth2/authorize?client_id=${process.env.DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(process.env.DISCORD_REDIRECT_URI)}&response_type=code&scope=identify`);
@@ -184,21 +189,22 @@ app.post('/auth/logout', (req, res) => {
 app.get('/api/status', check_auth, async (req, res) => {
   try {
     const running = await isRunning();
-    res.json({ running, sessionName: cfg.screenSessionName, startCmd: cfg.startCmd });
+    res.json({ running, startCmd: cfg.startCmd, cronJobs: cfg.cronJobs || [] });
   } catch (err) {
     res.status(500).json({ err: err.message });
   }
 });
 
 app.post('/api/settings', check_auth, actionLimit, express.json(), (req, res) => {
-  const { screenSessionName, startCmd } = req.body;
-  if (!screenSessionName || !startCmd) return res.status(400).json({ err: 'bad args' });
+  const { startCmd, cronJobs } = req.body;
+  if (!startCmd) return res.status(400).json({ err: 'bad args' });
 
-  cfg.screenSessionName = screenSessionName;
   cfg.startCmd = startCmd;
+  if (cronJobs) cfg.cronJobs = cronJobs;
 
   try {
     fs.writeFileSync(path.join(__dirname, 'config.json'), JSON.stringify(cfg, null, 2), 'utf8');
+    setupCron();
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ err: err.message });
@@ -253,10 +259,9 @@ app.post('/api/action', check_auth, actionLimit, express.json(), async (req, res
       await run_cmd('stop');
       res.json({ ok: true });
     } else if (act === 'kill') {
-      if (!isWin) {
-        exec(`screen -S "${cfg.screenSessionName}" -X quit`, (err) => {
-          if (err) exec(`pkill -f "SCREEN.*${cfg.screenSessionName}"`);
-        });
+      if (mcProcess) {
+        mcProcess.kill('SIGKILL');
+        mcProcess = null;
       }
       res.json({ ok: true });
     } else {
@@ -475,6 +480,39 @@ app.get('/app.js', (req, res) => {
     res.send(obfuscated);
   } catch (err) {
     res.status(500).send('/* err */');
+  }
+});
+
+app.get('/api/modrinth/search', check_auth, async (req, res) => {
+  try {
+    const q = req.query.q || '';
+    const r = await axios.get(`https://api.modrinth.com/v2/search?query=${encodeURIComponent(q)}&facets=[["project_type:plugin"]]&limit=10`);
+    res.json(r.data.hits);
+  } catch (err) {
+    res.status(500).json({ err: err.message });
+  }
+});
+
+app.post('/api/modrinth/install', check_auth, actionLimit, express.json(), async (req, res) => {
+  try {
+    const proj = req.body.project_id;
+    const vRes = await axios.get(`https://api.modrinth.com/v2/project/${proj}/version`);
+    const versions = vRes.data;
+    if (!versions.length) return res.status(404).json({ err: 'no versions' });
+    
+    const file = versions[0].files[0];
+    const target = path.join(cfg.mcPath, 'plugins', file.filename);
+    
+    const dRes = await axios.get(file.url, { responseType: 'stream' });
+    if (!fs.existsSync(path.dirname(target))) fs.mkdirSync(path.dirname(target), { recursive: true });
+    
+    const w = fs.createWriteStream(target);
+    dRes.data.pipe(w);
+    
+    w.on('finish', () => res.json({ ok: true, file: file.filename }));
+    w.on('error', (e) => res.status(500).json({ err: e.message }));
+  } catch (err) {
+    res.status(500).json({ err: err.message });
   }
 });
 

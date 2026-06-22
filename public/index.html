@@ -89,8 +89,10 @@
           <button class="mc-btn sm-btn quick-cmd-btn" data-cmd="save-all">Save World</button>
           <button class="mc-btn sm-btn quick-cmd-btn" data-cmd="time set day">Time: Day</button>
           <button class="mc-btn sm-btn quick-cmd-btn" data-cmd="time set night">Time: Night</button>
-          <button class="mc-btn sm-btn quick-cmd-btn" data-cmd="whitelist on">Whitelist: On</button>
-          <button class="mc-btn sm-btn quick-cmd-btn" data-cmd="whitelist off">Whitelist: Off</button>
+          <button onclick="run('whitelist on')">Whitelist: On</button>
+          <button onclick="run('whitelist off')">Whitelist: Off</button>
+          <button onclick="showModal('plugins-modal')" style="grid-column: span 2; border-color: #f39c12; color: #f39c12">Install Plugins</button>
+          <button onclick="showModal('cron-modal')" style="grid-column: span 2; border-color: #9b59b6; color: #9b59b6">Scheduled Tasks</button>
         </div>
 
         <h3 class="sec-title" style="margin-top: 25px;">Settings</h3>
@@ -176,5 +178,33 @@
   </div>
 
   <script src="app.js"></script>
+</div>
+
+<div id="plugins-modal" class="modal hidden">
+  <div class="modal-content" style="max-width: 600px;">
+    <h3 style="color:#f39c12">Install Plugin (Modrinth)</h3>
+    <div style="display:flex; gap:10px; margin-bottom:15px">
+      <input type="text" id="plugin-search-input" placeholder="Search (e.g. LuckPerms)..." style="flex:1" onkeydown="if(event.key==='Enter') searchPlugins()">
+      <button onclick="searchPlugins()" style="width:auto">Search</button>
+    </div>
+    <div id="plugin-results" style="max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;">
+    </div>
+    <button onclick="hideModal('plugins-modal')" style="margin-top:15px; width:100%">Close</button>
+  </div>
+</div>
+
+<div id="cron-modal" class="modal hidden">
+  <div class="modal-content" style="max-width: 600px;">
+    <h3 style="color:#9b59b6">Scheduled Tasks</h3>
+    <div id="cron-list" style="margin-bottom: 15px; display:flex; flex-direction:column; gap:10px;"></div>
+    <div style="border: 1px dashed #333; padding: 10px; display: flex; flex-direction: column; gap: 5px;">
+      <input type="text" id="new-cron-expr" placeholder="Cron expression (e.g. 0 4 * * *)">
+      <input type="text" id="new-cron-cmd" placeholder="Command to run (e.g. say Restarting!)">
+      <button onclick="addCron()" style="border-color:#2ecc71; color:#2ecc71">Add Task</button>
+    </div>
+    <button onclick="hideModal('cron-modal')" style="margin-top:15px; width:100%">Close</button>
+  </div>
+</div>
+
 </body>
 </html>

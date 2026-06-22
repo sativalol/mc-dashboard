@@ -2,6 +2,7 @@ let user = null;
 let curPath = '';
 let sse = null;
 let logs = [];
+let currentCronJobs = [];
 
 // DOM refs
 const els = {
@@ -116,12 +117,103 @@ function showDash() {
   ls('');
 }
 
+async function searchPlugins() {
+  const q = document.getElementById('plugin-search-input').value;
+  if (!q) return;
+  const res = document.getElementById('plugin-results');
+  res.innerHTML = '<span style="color:#aaa">Searching Modrinth...</span>';
+  try {
+    const r = await fetch(`/api/modrinth/search?q=${encodeURIComponent(q)}`);
+    const hits = await r.json();
+    if (!hits || !hits.length) {
+      res.innerHTML = '<span style="color:#e74c3c">No plugins found.</span>';
+      return;
+    }
+    res.innerHTML = hits.map(h => `
+      <div style="border:1px solid #444; padding:10px; background:#1e1e1e; display:flex; justify-content:space-between; align-items:center">
+        <div>
+          <div style="font-weight:bold; color:#f39c12">${h.title}</div>
+          <div style="font-size:0.8em; color:#aaa">${h.description}</div>
+        </div>
+        <button onclick="installPlugin('${h.project_id}')" style="margin:0; width:auto; border-color:#2ecc71; color:#2ecc71">Install</button>
+      </div>
+    `).join('');
+  } catch (e) {
+    res.innerHTML = '<span style="color:#e74c3c">Error: ' + e.message + '</span>';
+  }
+}
+
+async function installPlugin(id) {
+  if (!confirm('Install this plugin directly to the server?')) return;
+  try {
+    const r = await fetch('/api/modrinth/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: id })
+    });
+    const d = await r.json();
+    if (d.ok) alert('Installed ' + d.file + ' to plugins directory! Restart server to apply.');
+    else alert('Failed: ' + d.err);
+  } catch (e) { alert(e.message); }
+}
+
+function renderCronList() {
+  const c = document.getElementById('cron-list');
+  if (!c) return;
+  if (!currentCronJobs.length) {
+    c.innerHTML = '<span style="color:#aaa; font-style:italic">No scheduled tasks yet.</span>';
+    return;
+  }
+  c.innerHTML = currentCronJobs.map((j, i) => `
+    <div style="border:1px solid #444; background:#1e1e1e; padding:10px; display:flex; justify-content:space-between; align-items:center">
+      <div>
+        <div style="color:#9b59b6; font-family:monospace; font-weight:bold">${j.expr}</div>
+        <div style="font-size:0.9em; color:#aaa">> ${j.cmds.join(' && ')}</div>
+      </div>
+      <button onclick="deleteCron(${i})" style="margin:0; width:auto; border-color:#e74c3c; color:#e74c3c">Delete</button>
+    </div>
+  `).join('');
+}
+
+async function addCron() {
+  const expr = document.getElementById('new-cron-expr').value;
+  const cmd = document.getElementById('new-cron-cmd').value;
+  if (!expr || !cmd) return alert('Fill out both fields');
+  currentCronJobs.push({ expr, cmds: [cmd] });
+  await saveCron();
+}
+
+async function deleteCron(i) {
+  if (!confirm('Remove this task?')) return;
+  currentCronJobs.splice(i, 1);
+  await saveCron();
+}
+
+async function saveCron() {
+  try {
+    const s = document.getElementById('setting-start-cmd').value;
+    const r = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ startCmd: s, cronJobs: currentCronJobs })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      renderCronList();
+      document.getElementById('new-cron-expr').value = '';
+      document.getElementById('new-cron-cmd').value = '';
+    } else {
+      alert(d.err);
+    }
+  } catch(e) { alert(e.message); }
+}
+
 async function updateStatus() {
   try {
     const res = await fetch('/api/status');
-    const data = await res.json();
+    const d = await res.json();
     
-    if (data.running) {
+    if (d.running) {
       els.statusDot.className = 'pulse-indicator status-online';
       els.statusTxt.innerText = 'Online';
       els.statusTxt.className = 'status-online';
@@ -130,12 +222,17 @@ async function updateStatus() {
       els.statusTxt.innerText = 'Offline';
       els.statusTxt.className = 'status-offline';
     }
-    document.getElementById('session-name').innerText = data.sessionName || 'mc-server';
-
+    
+    document.getElementById('session-name').innerText = 'local-daemon';
     const sIn = document.getElementById('setting-screen-name');
     const cIn = document.getElementById('setting-start-cmd');
-    if (sIn && document.activeElement !== sIn) sIn.value = data.sessionName || '';
-    if (cIn && document.activeElement !== cIn) cIn.value = data.startCmd || '';
+    if (sIn && document.activeElement !== sIn) sIn.value = 'mc-process';
+    if (cIn && document.activeElement !== cIn && d.startCmd) cIn.value = d.startCmd;
+    
+    if (d.cronJobs) {
+      currentCronJobs = d.cronJobs;
+      renderCronList();
+    }
   } catch (err) {
     // whatever
   }
@@ -293,7 +390,7 @@ async function uploadFile(e) {
     if (data.ok) ls(curPath);
     else alert(data.err);
   } catch (err) {
-    alert(err.message);
+    alert(data.message);
   }
 }
 
@@ -489,11 +586,6 @@ async function mv(oldPath, oldName) {
 }
 
 async function saveCfg() {
-  const screenSessionName = document.getElementById('setting-screen-name').value.trim();
-  const startCmd = document.getElementById('setting-start-cmd').value.trim();
-  
-  if (!screenSessionName || !startCmd) return alert('fill it out');
-  
   const btn = document.getElementById('btn-save-settings');
   const orig = btn.innerText;
   btn.innerText = 'SAVING...';
@@ -503,7 +595,10 @@ async function saveCfg() {
     const res = await fetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ screenSessionName, startCmd })
+      body: JSON.stringify({
+        startCmd: document.getElementById('setting-start-cmd').value,
+        cronJobs: currentCronJobs
+      })
     });
     const data = await res.json();
     if (data.ok) {
