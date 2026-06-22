@@ -32,15 +32,15 @@ app.use((req, res, next) => {
   next();
 });
 
-const limits = {};
 function limit(max, ms) {
+  const bucket = {};
   return (req, res, next) => {
     const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
     const now = Date.now();
-    if (!limits[ip]) limits[ip] = [];
-    limits[ip] = limits[ip].filter(t => now - t < ms);
-    if (limits[ip].length >= max) return res.status(429).json({ err: 'rate limited' });
-    limits[ip].push(now);
+    if (!bucket[ip]) bucket[ip] = [];
+    bucket[ip] = bucket[ip].filter(t => now - t < ms);
+    if (bucket[ip].length >= max) return res.status(429).json({ err: 'rate limited' });
+    bucket[ip].push(now);
     next();
   };
 }
