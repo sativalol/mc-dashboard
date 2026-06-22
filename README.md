@@ -1,18 +1,19 @@
 # rack
 
-basic minecraft server panel. runs your server in a screen session and streams the logs to a web dashboard.
+basic minecraft server panel. runs your server natively as a background process and streams the logs to a web dashboard.
 
 ## features
+- direct, instant native process management (no buggy screen/tmux layers)
 - file manager (upload, edit, rename, delete, create backups)
 - live terminal stream, send commands direct to console
-- start/stop/force kill server via screen
+- one-click plugin installation via Modrinth
+- scheduled tasks / cron jobs 
 - live metrics (cpu/ram)
 - discord oauth whitelist login so randoms can't nuke your server
 
 ## requirements
 - nodejs & npm
 - git
-- screen (for keeping the mc server alive)
 - pm2 (recommended for keeping the dashboard alive)
 
 ## setup locally
@@ -30,7 +31,7 @@ basic minecraft server panel. runs your server in a screen session and streams t
 
 ## vps deployment
 getting this on a linux box is basically the same, just a few extra steps:
-1. install the junk: `sudo apt update && sudo apt install nodejs npm git screen -y`
+1. install the junk: `sudo apt update && sudo apt install nodejs npm git -y`
 2. clone the repo and `npm i`
 3. copy `config.example.json` to `config.json`. **important**: change `mcPath` to the absolute linux path of your server (e.g. `/home/mc/server`). don't use windows paths. update `startCmd` to whatever starts your server.
 4. setup your `.env`. make sure `DISCORD_REDIRECT_URI` points to your VPS IP or domain (e.g. `http://YOUR_VPS_IP:3000/auth/callback`).
