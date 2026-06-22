@@ -587,3 +587,56 @@ body {
   font-size: 8px;
   padding: 8px 4px;
 }
+
+/* Mobile Responsiveness */
+@media (max-width: 800px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+    padding: 10px;
+  }
+  
+  .terminal-sec {
+    height: 350px;
+    order: -1; /* Move terminal to top on mobile */
+  }
+  
+  .minecraft-header {
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    text-align: center;
+  }
+  
+  .files-sec {
+    margin: 10px;
+  }
+  
+  .files-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  
+  .file-actions {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  
+  .modal-content {
+    width: 95%;
+    height: 80vh;
+  }
+  
+  .terminal-header-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .terminal-input-row {
+    flex-wrap: wrap;
+  }
+  
+  #terminal-input {
+    min-width: 150px;
+  }
+}
