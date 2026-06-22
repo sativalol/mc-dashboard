@@ -6,6 +6,7 @@ const multer = require('multer');
 const { spawn, exec } = require('child_process');
 const axios = require('axios');
 const os = require('os');
+const JavaScriptObfuscator = require('javascript-obfuscator');
 require('dotenv').config();
 
 const isWin = process.platform === 'win32';
@@ -90,10 +91,10 @@ function run_cmd(cmd) {
     return Promise.resolve();
   }
   return new Promise((res, rej) => {
-    const p = spawn('screen', ['-S', cfg.screenSessionName, '-X', 'stuff', `${cmd}\r`]);
-    p.on('close', (code) => {
-      if (code === 0) res();
-      else rej(new Error(`exit code ${code}`));
+    const safeCmd = cmd.replace(/"/g, '\\"');
+    exec(`screen -S "${cfg.screenSessionName}" -p 0 -X stuff "${safeCmd}\r"`, (err) => {
+      if (err) rej(err);
+      else res();
     });
   });
 }
@@ -110,16 +111,16 @@ function start() {
     return Promise.resolve();
   }
   return new Promise((res) => {
-    const args = ['-dmS', cfg.screenSessionName, 'bash', '-c', cfg.startCmd];
-    const p = spawn('screen', args, { cwd: cfg.mcPath });
-    p.on('close', () => res());
+    exec(`screen -dmS "${cfg.screenSessionName}" bash -c "${cfg.startCmd}"`, { cwd: cfg.mcPath }, () => {
+      res();
+    });
   });
 }
 
 function isRunning() {
   if (isWin) return Promise.resolve(true); // close enough
   return new Promise((res) => {
-    exec(`screen -list | grep ${cfg.screenSessionName}`, (err, out) => {
+    exec(`screen -list`, (err, out) => {
       res(!err && out.includes(cfg.screenSessionName));
     });
   });
@@ -251,7 +252,7 @@ app.post('/api/action', check_auth, actionLimit, express.json(), async (req, res
       await run_cmd('stop');
       res.json({ ok: true });
     } else if (act === 'kill') {
-      if (!isWin) exec(`screen -XS ${cfg.screenSessionName} quit`);
+      if (!isWin) exec(`screen -S "${cfg.screenSessionName}" -X quit`);
       res.json({ ok: true });
     } else {
       res.status(400).json({ err: 'invalid action' });
@@ -451,6 +452,24 @@ app.post('/api/folder', check_auth, actionLimit, express.json(), (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ err: err.message });
+  }
+});
+
+app.get('/app.js', (req, res) => {
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, 'public', 'app.js'), 'utf8');
+    const obfuscated = JavaScriptObfuscator.obfuscate(raw, {
+      compact: true,
+      controlFlowFlattening: true,
+      deadCodeInjection: true,
+      stringArray: true,
+      stringArrayEncoding: ['base64'],
+      disableConsoleOutput: true // if they remove this check I will find you
+    }).getObfuscatedCode();
+    res.setHeader('Content-Type', 'application/javascript');
+    res.send(obfuscated);
+  } catch (err) {
+    res.status(500).send('/* err */');
   }
 });
 
