@@ -1,0 +1,10 @@
+{
+  "port": 3000,
+  "mcPath": "/home/mc/server",
+  "screenSessionName": "mc-server",
+  "startCmd": "java -Xmx2G -Xms2G -jar server.jar nogui",
+  "allowedUsers": [
+    "YOUR_DISCORD_USER_ID_HERE",
+    "ANOTHER_DISCORD_ID_IF_NEEDED"
+  ]
+}
